@@ -32,7 +32,7 @@
 #include "filesystem.h"
 #include "hud_controlpointicons.h"
 
-ConVar cl_map("cl_map", -1);
+ConVar cl_map("cl_map", "-1");
 
 using namespace vgui;
 
@@ -3095,6 +3095,10 @@ void CTFCreateServerDialog::OnCommand(const char* command)
 	else if (!stricmp(command, "CreateServer"))
 	{
 		SaveValues();
+		if ( m_pDescription )
+		{
+			m_pDescription->WriteToConfig();
+		}
 		CScriptObject* pMapInfoObj = m_pDescription->FindObject("cl_map");
 		if ( pMapInfoObj )
 		{
@@ -3102,41 +3106,43 @@ void CTFCreateServerDialog::OnCommand(const char* command)
 
 			if ( pItem )
 			{
-				const char *val = pItem->szItemText;
-				char szValue[256];
-				mpcontrol_t *pList = m_pList;
-				
-				ComboBox *pCombo = (ComboBox*)pList->pControl;
-				// pCombo->GetText( strValue, sizeof( strValue ) );
-				int activeItem = pCombo->GetActiveItem();
-
-				pItem = pMapInfoObj->pListItems;
-				//			int n = (int)pObj->fdefValue;
-
-				while (pItem)
+				while ( pItem )
 				{
-					if (!activeItem--)
+					// This is horrible.
+					if (!Q_stricmp(pItem->szValue, pMapInfoObj->curValue))
+					{
+						if(!Q_stricmp(pItem->szItemText, "#GameUI_RandomMap"))
+						{
+							CScriptListItem *p;
+							int c = 0;
+							p = pMapInfoObj->pListItems;
+							while ( p )
+							{
+								p = p->pNext;
+								c++;
+							}
+
+							int v = RandomInt(1, c); // Ignore the RandomMap option
+							p = pMapInfoObj->pListItems;
+							c = 0;
+							while ( p )
+							{
+								if(c == v)
+									break;
+								p = p->pNext;
+								c++;
+							}
+							pItem = p;
+						}
 						break;
+					}
 
 					pItem = pItem->pNext;
 				}
 
-				if (pItem)
-				{
-					sprintf(szValue, "%s", pItem->szItemText);
-				}
-				else  // Couln't find index
-				{
-					//assert(!("Couldn't find string in list, using default value"));
-					sprintf(szValue, "%s", pMapInfoObj->defValue);
-				}
-				engine->ClientCmd_Unrestricted(CFmtStr("echo %s", szValue));
+				engine->ClientCmd_Unrestricted(CFmtStr("map %s", pItem->szItemText));
 			}
 
-		}
-		if ( m_pDescription )
-		{
-			m_pDescription->WriteToConfig();
 		}
 		OnClose();
 		return;
