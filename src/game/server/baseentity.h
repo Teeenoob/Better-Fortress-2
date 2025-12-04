@@ -23,6 +23,10 @@
 #include "vscript/ivscript.h"
 #include "vscript_server.h"
 
+class IPhysicsObject;
+void PhysDisableEntityCollisions( IPhysicsObject *pObject0, IPhysicsObject *pObject1 );
+void PhysEnableEntityCollisions( IPhysicsObject *pObject0, IPhysicsObject *pObject1 );
+
 class CDamageModifier;
 class CDmgAccumulator;
 
