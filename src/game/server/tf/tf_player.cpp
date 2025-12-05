@@ -20265,6 +20265,8 @@ void CTFPlayer::DoTauntAttack( void )
 				}
 				else if (iTauntAttack == TAUNTATK_HEAVY_PUNCHOUT_KILL)
 				{
+					//Offset angle to match left hook.
+					AngleVectors( QAngle(-45, m_angEyeAngles[YAW]-35, 0), &vecForward );
 					pList[i]->TakeDamage(CTakeDamageInfo(this, this, GetActiveTFWeapon(), vecForward * 27500, vecPos, 400.0f, DMG_CLUB, TF_DMG_CUSTOM_TAUNTATK_PUNCHOUT));
 					EmitSound( "Weapon_BoxingGloves.CritHit");
 				}
