@@ -42,8 +42,9 @@
 //-----------------------------------------------------------------------------
 // ConVars
 //-----------------------------------------------------------------------------
-ConVar sv_crashreporting_enabled( "sv_crashreporting_enabled", "1", FCVAR_NONE,
-	"Enable server crash reporting and stack trace logging." );
+// Make it FCVAR_SPONLY to prevent changes during runtime that could cause issues
+ConVar sv_crashreporting_enabled( "sv_crashreporting_enabled", "0", FCVAR_SPONLY,
+	"Enable server crash reporting and stack trace logging. (Read on startup, cannot be changed at runtime)" );
 
 //-----------------------------------------------------------------------------
 // Static members
@@ -117,10 +118,7 @@ void CServerCrashHandler::Init()
 	
 	Msg( "[ServerCrashHandler] Initializing server crash reporting system...\n" );
 	
-	s_bInitialized = true;
-	s_bEnabled = sv_crashreporting_enabled.GetBool();
-	
-	// Initialize metadata
+	// Initialize metadata BEFORE setting initialized flag
 	V_memset( &s_Metadata, 0, sizeof( s_Metadata ) );
 	s_Metadata.bDedicated = true;
 	
@@ -147,6 +145,10 @@ void CServerCrashHandler::Init()
 		V_strncpy( s_szCrashLogPath, CRASH_LOG_DIR, sizeof(s_szCrashLogPath) );
 	}
 	
+	// Set initialized BEFORE installing signal handlers
+	s_bInitialized = true;
+	s_bEnabled = sv_crashreporting_enabled.GetBool();
+	
 	if ( s_bEnabled )
 	{
 		InstallSignalHandlers();
@@ -156,6 +158,9 @@ void CServerCrashHandler::Init()
 	CreateDirectoryA( "customfortress", NULL );
 	CreateDirectoryA( CRASH_LOG_DIR, NULL );
 	V_strncpy( s_szCrashLogPath, CRASH_LOG_DIR, sizeof(s_szCrashLogPath) );
+	
+	s_bInitialized = true;
+	s_bEnabled = sv_crashreporting_enabled.GetBool();
 #endif
 	
 	Msg( "[ServerCrashHandler] Initialized. Crash logs will be written to %s/\n", s_szCrashLogPath );
@@ -528,6 +533,27 @@ void CServerCrashHandler::SignalHandler( int nSignal, siginfo_t *pInfo, void *pC
 		_exit( 128 + nSignal );
 	}
 	s_bInCrashHandler = 1;
+	
+	// Safety check: ensure handler is actually enabled and initialized
+	if ( !s_bEnabled || !s_bInitialized )
+	{
+		// Not properly initialized, restore original handler and re-raise
+		struct sigaction* pOldHandler = NULL;
+		switch ( nSignal )
+		{
+			case SIGSEGV: pOldHandler = &s_OldSIGSEGV; break;
+			case SIGABRT: pOldHandler = &s_OldSIGABRT; break;
+			case SIGFPE:  pOldHandler = &s_OldSIGFPE;  break;
+			case SIGILL:  pOldHandler = &s_OldSIGILL;  break;
+			case SIGBUS:  pOldHandler = &s_OldSIGBUS;  break;
+		}
+		if ( pOldHandler && pOldHandler->sa_sigaction )
+		{
+			sigaction( nSignal, pOldHandler, NULL );
+		}
+		raise( nSignal );
+		_exit( 128 + nSignal );
+	}
 
 	void* pFaultAddress = pInfo ? pInfo->si_addr : NULL;
 	const char* pszSignal = GetSignalName( nSignal );
@@ -552,7 +578,7 @@ void CServerCrashHandler::SignalHandler( int nSignal, siginfo_t *pInfo, void *pC
 		case SIGBUS:  pOldHandler = &s_OldSIGBUS;  break;
 	}
 
-	if ( pOldHandler )
+	if ( pOldHandler && pOldHandler->sa_sigaction )
 	{
 		sigaction( nSignal, pOldHandler, NULL );
 	}
@@ -570,8 +596,17 @@ void CServerCrashHandler::InstallSignalHandlers()
 	memset( &sa, 0, sizeof(sa) );
 	
 	sa.sa_sigaction = SignalHandler;
-	sa.sa_flags = SA_SIGINFO | SA_RESETHAND;
+	// Remove SA_RESETHAND to prevent handler reset issues
+	// Use SA_NODEFER to allow reentrant signals during crash handling
+	sa.sa_flags = SA_SIGINFO | SA_NODEFER | SA_ONSTACK;
 	sigemptyset( &sa.sa_mask );
+	
+	// Block all crash signals while handling one to prevent nested crashes
+	sigaddset( &sa.sa_mask, SIGSEGV );
+	sigaddset( &sa.sa_mask, SIGABRT );
+	sigaddset( &sa.sa_mask, SIGFPE );
+	sigaddset( &sa.sa_mask, SIGILL );
+	sigaddset( &sa.sa_mask, SIGBUS );
 
 	// Install handlers for common crash signals
 	sigaction( SIGSEGV, &sa, &s_OldSIGSEGV );

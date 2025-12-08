@@ -74,6 +74,10 @@ void CTFProjectile_ScrapBall::Spawn()
 	
 	m_bExploded = false;
 	m_iMetalCost = 0;
+	
+	// Set up think function to check for water
+	SetThink( &CTFProjectile_ScrapBall::FlyThink );
+	SetNextThink( gpGlobals->curtime + 0.1f );
 }
 
 //-----------------------------------------------------------------------------
@@ -129,6 +133,14 @@ void CTFProjectile_ScrapBall::RocketTouch( CBaseEntity *pOther )
 	// Prevent double-explosion
 	if ( m_bExploded )
 		return;
+
+	// Check for water - scrapballs fizzle out in water
+	if ( GetWaterLevel() > 0 )
+	{
+		// Just remove the projectile when it enters water
+		UTIL_Remove( this );
+		return;
+	}
 
 	// Verify a correct "other"
 	if ( !pOther )
@@ -247,6 +259,23 @@ void CTFProjectile_ScrapBall::Explode( trace_t *pTrace, CBaseEntity *pOther )
 
 	// Remove the rocket
 	UTIL_Remove( this );
+}
+
+//-----------------------------------------------------------------------------
+// Purpose: Think function to check for water and other conditions
+//-----------------------------------------------------------------------------
+void CTFProjectile_ScrapBall::FlyThink( void )
+{
+	// Check if we're in water - scrapballs fizzle in water
+	if ( GetWaterLevel() > 0 )
+	{
+		// Remove the projectile silently when it enters water
+		UTIL_Remove( this );
+		return;
+	}
+	
+	// Continue thinking
+	SetNextThink( gpGlobals->curtime + 0.1f );
 }
 
 //-----------------------------------------------------------------------------

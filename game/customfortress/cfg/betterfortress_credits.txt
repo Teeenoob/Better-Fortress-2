@@ -124,7 +124,7 @@ DESCRIPTION INFO_OPTIONS
 		{ BOOL }
 		{ "1" }
 	}
-	"credit5_4"
+	"credit5_5"
 	{
 		"Hactica - Community Animation Fixes"
 		{ BOOL }

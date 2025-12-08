@@ -35,6 +35,7 @@ public:
 	// OVERRIDES.
 	virtual void RocketTouch( CBaseEntity *pOther ) OVERRIDE;
 	virtual void Explode( trace_t *pTrace, CBaseEntity *pOther ) OVERRIDE;
+	void FlyThink( void );
 
 	// IScorer interface
 	virtual CBasePlayer *GetScorer( void );
