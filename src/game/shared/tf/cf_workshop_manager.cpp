@@ -1942,7 +1942,8 @@ bool CCFWorkshopManager::StartUpload(
 	CFWorkshopItemType_t type,
 	ERemoteStoragePublishedFileVisibility visibility,
 	PublishedFileId_t existingFileID,
-	const char* pszTags)
+	const char* pszTags,
+	const char* pszScreenshotsPath)
 {
 	if (m_bUploadInProgress)
 	{
@@ -1996,11 +1997,27 @@ bool CCFWorkshopManager::StartUpload(
 		}
 	}
 
+	// Convert screenshots path to absolute if provided
+	char szAbsScreenshotsPath[MAX_PATH] = {0};
+	if (pszScreenshotsPath && pszScreenshotsPath[0])
+	{
+		V_MakeAbsolutePath(szAbsScreenshotsPath, sizeof(szAbsScreenshotsPath), pszScreenshotsPath, NULL);
+		
+		// Check if screenshots path exists
+		if (!g_pFullFileSystem->IsDirectory(szAbsScreenshotsPath))
+		{
+			CFWorkshopWarning("Screenshots path does not exist: %s\n", szAbsScreenshotsPath);
+			// Don't fail, just warn and proceed without screenshots
+			szAbsScreenshotsPath[0] = '\0';
+		}
+	}
+
 	// Store pending upload info with absolute paths
 	m_strPendingTitle = pszTitle;
 	m_strPendingDescription = pszDescription ? pszDescription : "";
 	m_strPendingContentPath = szAbsContentPath;
 	m_strPendingPreviewPath = szAbsPreviewPath;
+	m_strPendingScreenshotsPath = szAbsScreenshotsPath;
 	m_strPendingTags = pszTags ? pszTags : "";
 	m_ePendingType = type;
 	m_ePendingVisibility = visibility;
@@ -2055,24 +2072,12 @@ void CCFWorkshopManager::StartItemUpdate(PublishedFileId_t fileID)
 		pUGC->SetItemDescription(m_hCurrentUpdate, m_strPendingDescription.Get());
 	}
 
-	// Build tags array - include type tag plus any user-selected tags
+	// Build tags array from user-selected tags
 	CUtlVector<const char*> tagList;
 	CUtlVector<CUtlString> tagStorage;  // Keep strings alive
 	
-	// Add the type tag first
-	const char* pszTypeTag = "Other";
-	switch (m_ePendingType)
-	{
-		case CF_WORKSHOP_TYPE_MAP: pszTypeTag = "Map"; break;
-		case CF_WORKSHOP_TYPE_WEAPON_SKIN: pszTypeTag = "Weapon Skin"; break;
-		case CF_WORKSHOP_TYPE_WEAPON_MOD: pszTypeTag = "Weapon Mod"; break;
-		case CF_WORKSHOP_TYPE_CHARACTER_SKIN: pszTypeTag = "Character Skin"; break;
-		case CF_WORKSHOP_TYPE_PARTICLE_EFFECT: pszTypeTag = "Particle"; break;
-		case CF_WORKSHOP_TYPE_SOUND_MOD: pszTypeTag = "Sound"; break;
-		case CF_WORKSHOP_TYPE_HUD: pszTypeTag = "HUD"; break;
-		default: pszTypeTag = "Other"; break;
-	}
-	tagList.AddToTail(pszTypeTag);
+	// Check if user has already selected a mod type tag
+	bool bHasModTypeTag = false;
 	
 	// Parse and add user-selected tags from comma-separated string
 	if (m_strPendingTags.Length() > 0)
@@ -2093,6 +2098,19 @@ void CCFWorkshopManager::StartItemUpdate(PublishedFileId_t fileID)
 			
 			if (*pszToken)
 			{
+				// Check if this is a mod type tag
+				if (V_stricmp(pszToken, CF_WORKSHOP_TAG_MOD_MAP) == 0 ||
+					V_stricmp(pszToken, CF_WORKSHOP_TAG_MOD_SKIN) == 0 ||
+					V_stricmp(pszToken, CF_WORKSHOP_TAG_MOD_WEAPON) == 0 ||
+					V_stricmp(pszToken, CF_WORKSHOP_TAG_MOD_GUI) == 0 ||
+					V_stricmp(pszToken, CF_WORKSHOP_TAG_MOD_PARTICLES) == 0 ||
+					V_stricmp(pszToken, CF_WORKSHOP_TAG_MOD_SOUNDS) == 0 ||
+					V_stricmp(pszToken, CF_WORKSHOP_TAG_MOD_SPRAYS) == 0 ||
+					V_stricmp(pszToken, CF_WORKSHOP_TAG_MOD_MISC) == 0)
+				{
+					bHasModTypeTag = true;
+				}
+				
 				// Store the string and add pointer to list
 				int idx = tagStorage.AddToTail();
 				tagStorage[idx] = pszToken;
@@ -2103,6 +2121,31 @@ void CCFWorkshopManager::StartItemUpdate(PublishedFileId_t fileID)
 #else
 			pszToken = strtok_r(NULL, ",", &pszContext);
 #endif
+		}
+	}
+	
+	// Only add automatic type tag if user hasn't selected a mod type tag
+	if (!bHasModTypeTag)
+	{
+		const char* pszTypeTag = NULL;
+		switch (m_ePendingType)
+		{
+			case CF_WORKSHOP_TYPE_MAP: pszTypeTag = CF_WORKSHOP_TAG_MOD_MAP; break;
+			case CF_WORKSHOP_TYPE_WEAPON_SKIN: pszTypeTag = CF_WORKSHOP_TAG_MOD_SKIN; break;
+			case CF_WORKSHOP_TYPE_WEAPON_MOD: pszTypeTag = CF_WORKSHOP_TAG_MOD_WEAPON; break;
+			case CF_WORKSHOP_TYPE_CHARACTER_SKIN: pszTypeTag = CF_WORKSHOP_TAG_MOD_SKIN; break;
+			case CF_WORKSHOP_TYPE_PARTICLE_EFFECT: pszTypeTag = CF_WORKSHOP_TAG_MOD_PARTICLES; break;
+			case CF_WORKSHOP_TYPE_SOUND_MOD: pszTypeTag = CF_WORKSHOP_TAG_MOD_SOUNDS; break;
+			case CF_WORKSHOP_TYPE_HUD: pszTypeTag = CF_WORKSHOP_TAG_MOD_GUI; break;
+			default: pszTypeTag = CF_WORKSHOP_TAG_MOD_MISC; break;
+		}
+		
+		if (pszTypeTag)
+		{
+			// Add to beginning of list
+			int idx = tagStorage.AddToTail();
+			tagStorage[idx] = pszTypeTag;
+			tagList.InsertBefore(0, tagStorage[idx].Get());
 		}
 	}
 
@@ -2118,6 +2161,52 @@ void CCFWorkshopManager::StartItemUpdate(PublishedFileId_t fileID)
 	if (m_strPendingPreviewPath.Length() > 0)
 	{
 		pUGC->SetItemPreview(m_hCurrentUpdate, m_strPendingPreviewPath.Get());
+	}
+
+	// Add additional screenshots if folder provided
+	if (m_strPendingScreenshotsPath.Length() > 0)
+	{
+		FileFindHandle_t findHandle;
+		char szSearchPath[MAX_PATH];
+		V_snprintf(szSearchPath, sizeof(szSearchPath), "%s/*.*", m_strPendingScreenshotsPath.Get());
+		
+		const char* pszFileName = g_pFullFileSystem->FindFirstEx(szSearchPath, "GAME", &findHandle);
+		int nScreenshotCount = 0;
+		
+		while (pszFileName && nScreenshotCount < 10)  // Limit to 10 additional screenshots
+		{
+			if (!g_pFullFileSystem->FindIsDirectory(findHandle))
+			{
+				// Check if it's an image file
+				const char* pszExt = V_GetFileExtension(pszFileName);
+				if (pszExt && (V_stricmp(pszExt, "jpg") == 0 || V_stricmp(pszExt, "jpeg") == 0 || 
+							  V_stricmp(pszExt, "png") == 0))
+				{
+					char szFullPath[MAX_PATH];
+					V_snprintf(szFullPath, sizeof(szFullPath), "%s/%s", m_strPendingScreenshotsPath.Get(), pszFileName);
+					
+					// Add as additional preview (k_EItemPreviewType_Image = 0)
+					if (pUGC->AddItemPreviewFile(m_hCurrentUpdate, szFullPath, k_EItemPreviewType_Image))
+					{
+						CFWorkshopMsg("Added screenshot: %s\n", pszFileName);
+						nScreenshotCount++;
+					}
+					else
+					{
+						CFWorkshopWarning("Failed to add screenshot: %s\n", pszFileName);
+					}
+				}
+			}
+			
+			pszFileName = g_pFullFileSystem->FindNext(findHandle);
+		}
+		
+		g_pFullFileSystem->FindClose(findHandle);
+		
+		if (nScreenshotCount > 0)
+		{
+			CFWorkshopMsg("Added %d screenshot(s) to workshop item\n", nScreenshotCount);
+		}
 	}
 
 	// Set visibility
@@ -2201,9 +2290,234 @@ void CCFWorkshopManager::OnMapLoad(const char* pszMapName)
 		if (fileID != k_PublishedFileIdInvalid)
 		{
 			PrepareMap(fileID);
+			
+#ifndef CLIENT_DLL
+			// Server: Advertise in Steam server info (visible in server browser)
+			AdvertiseWorkshopMapID(fileID);
+			
+			// Server: Broadcast workshop map ID to all clients
+			BroadcastWorkshopMapID(fileID);
+#endif
 		}
 	}
+	else
+	{
+#ifndef CLIENT_DLL
+		// Not a workshop map, clear the server info
+		AdvertiseWorkshopMapID(0);
+#endif
+	}
 }
+
+#ifndef CLIENT_DLL
+// Server: Broadcast the workshop map ID to all clients
+void CCFWorkshopManager::BroadcastWorkshopMapID(PublishedFileId_t fileID)
+{
+	if (fileID == 0 || fileID == k_PublishedFileIdInvalid)
+		return;
+	
+	CFWorkshopMsg("Broadcasting workshop map ID %llu to clients\\n", fileID);
+	
+	// Send to all players
+	CRecipientFilter filter;
+	filter.AddAllPlayers();
+	
+	UserMessageBegin( filter, "WorkshopMapID" );
+		WRITE_LONG( (uint32)(fileID & 0xFFFFFFFF) );  // Low 32 bits
+		WRITE_LONG( (uint32)(fileID >> 32) );          // High 32 bits
+	MessageEnd();
+}
+
+// Server: Advertise workshop map ID in Steam server info
+void CCFWorkshopManager::AdvertiseWorkshopMapID(PublishedFileId_t fileID)
+{
+#ifndef NO_STEAM
+	if (!steamgameserverapicontext || !steamgameserverapicontext->SteamGameServer())
+		return;
+	
+	ISteamGameServer* pServer = steamgameserverapicontext->SteamGameServer();
+	
+	if (fileID != 0 && fileID != k_PublishedFileIdInvalid)
+	{
+		// Set the Workshop map ID as a server key-value pair
+		// This will be visible in server browser queries (A2S_RULES)
+		char szFileID[32];
+		V_snprintf(szFileID, sizeof(szFileID), "%llu", fileID);
+		pServer->SetKeyValue("workshop_map_id", szFileID);
+		
+		CFWorkshopMsg("Advertising workshop map ID %llu in server info\\n", fileID);
+	}
+	else
+	{
+		// Clear the Workshop map ID if map is not from workshop
+		pServer->SetKeyValue("workshop_map_id", "0");
+	}
+#endif
+}
+#endif
+
+#ifdef CLIENT_DLL
+// Client: Handle workshop map ID from server
+void CCFWorkshopManager::OnWorkshopMapIDReceived(PublishedFileId_t fileID)
+{
+	if (fileID == 0 || fileID == k_PublishedFileIdInvalid)
+		return;
+	
+	CFWorkshopMsg("Received workshop map ID %llu from server\\n", fileID);
+	
+	// Check if we already have this map
+	CCFWorkshopItem* pItem = GetItem(fileID);
+	if (pItem)
+	{
+		if (pItem->IsDownloaded() || pItem->IsInstalled())
+		{
+			CFWorkshopMsg("Map already downloaded/installed\\n");
+			return;
+		}
+	}
+	
+	// Check if we're subscribed
+	ISteamUGC* pUGC = GetSteamUGC();
+	if (!pUGC)
+	{
+		CFWorkshopWarning("Steam UGC not available, cannot download map\\n");
+		return;
+	}
+	
+	uint32 numSubscribed = pUGC->GetNumSubscribedItems();
+	PublishedFileId_t* pSubscribed = new PublishedFileId_t[numSubscribed];
+	pUGC->GetSubscribedItems(pSubscribed, numSubscribed);
+	
+	bool bIsSubscribed = false;
+	for (uint32 i = 0; i < numSubscribed; i++)
+	{
+		if (pSubscribed[i] == fileID)
+		{
+			bIsSubscribed = true;
+			break;
+		}
+	}
+	delete[] pSubscribed;
+	
+	if (!bIsSubscribed)
+	{
+		// Not subscribed - subscribe now
+		CFWorkshopMsg("Not subscribed to map %llu, subscribing...\\n", fileID);
+		SubscribeItem(fileID);
+	}
+	else
+	{
+		CFWorkshopMsg("Already subscribed to map %llu\\n", fileID);
+	}
+	
+	// Add or update the item
+	if (!pItem)
+	{
+		pItem = AddItem(fileID, CF_WORKSHOP_TYPE_MAP);
+	}
+	
+	// Download the map if not already downloaded
+	if (pItem && !pItem->IsDownloaded())
+	{
+		CFWorkshopMsg("Downloading map %llu...\\n", fileID);
+		pItem->Download(true);  // High priority
+	}
+}
+
+// Client: Parse Workshop map ID from server info string
+PublishedFileId_t CCFWorkshopManager::ParseWorkshopMapIDFromServerInfo(const char* pszValue)
+{
+	if (!pszValue || !pszValue[0])
+		return k_PublishedFileIdInvalid;
+	
+	// Parse the 64-bit file ID from string
+	return (PublishedFileId_t)V_atoui64(pszValue);
+}
+
+// Client: Check if we need to download map before connecting
+bool CCFWorkshopManager::CheckAndDownloadMapBeforeConnect(const char* pszServerIP, const char* pszMapName, PublishedFileId_t fileID)
+{
+	if (fileID == 0 || fileID == k_PublishedFileIdInvalid)
+	{
+		// Not a workshop map, normal connection
+		return true;
+	}
+	
+	CFWorkshopMsg("Server requires workshop map %llu (%s)\\n", fileID, pszMapName);
+	
+	// Check if we have the map file locally
+	char szMapPath[MAX_PATH];
+	V_snprintf(szMapPath, sizeof(szMapPath), "maps/%s.bsp", pszMapName);
+	
+	if (filesystem->FileExists(szMapPath, "GAME"))
+	{
+		CFWorkshopMsg("Map file already exists locally\\n");
+		return true;
+	}
+	
+	// Check if we have the item
+	CCFWorkshopItem* pItem = GetItem(fileID);
+	if (pItem && pItem->IsDownloaded())
+	{
+		CFWorkshopMsg("Workshop item already downloaded\\n");
+		return true;
+	}
+	
+	// We need to download this map
+	Warning("Downloading required workshop map before connecting...\\n");
+	Warning("Workshop ID: %llu\\n", fileID);
+	Warning("This may take a moment. Please wait...\\n");
+	
+	// Subscribe and download
+	ISteamUGC* pUGC = GetSteamUGC();
+	if (!pUGC)
+	{
+		Warning("Steam Workshop not available!\\n");
+		return false;
+	}
+	
+	// Check if subscribed
+	uint32 numSubscribed = pUGC->GetNumSubscribedItems();
+	bool bIsSubscribed = false;
+	
+	if (numSubscribed > 0)
+	{
+		PublishedFileId_t* pSubscribed = new PublishedFileId_t[numSubscribed];
+		pUGC->GetSubscribedItems(pSubscribed, numSubscribed);
+		
+		for (uint32 i = 0; i < numSubscribed; i++)
+		{
+			if (pSubscribed[i] == fileID)
+			{
+				bIsSubscribed = true;
+				break;
+			}
+		}
+		delete[] pSubscribed;
+	}
+	
+	if (!bIsSubscribed)
+	{
+		SubscribeItem(fileID);
+	}
+	
+	// Add to tracking
+	if (!pItem)
+	{
+		pItem = AddItem(fileID, CF_WORKSHOP_TYPE_MAP);
+	}
+	
+	// Start download
+	if (pItem)
+	{
+		pItem->Download(true);  // High priority
+	}
+	
+	// Return false to indicate download is in progress
+	// The connection should be retried after download completes
+	return false;
+}
+#endif
 
 void CCFWorkshopManager::GameServerSteamAPIActivated()
 {
@@ -2500,10 +2814,10 @@ CFWorkshopItemType_t CFWorkshop_GetItemTypeFromTags(const char* pszTags)
 		return CF_WORKSHOP_TYPE_OTHER;
 
 	// Parse comma-separated tags and determine type
-	if (V_stristr(pszTags, "map"))
-		return CF_WORKSHOP_TYPE_MAP;
 	if (V_stristr(pszTags, "Weapon Mod"))
 		return CF_WORKSHOP_TYPE_WEAPON_MOD;
+	if (V_stristr(pszTags, CF_WORKSHOP_TAG_MOD_MAP))
+		return CF_WORKSHOP_TYPE_MAP;
 	if (V_stristr(pszTags, "weapon") || V_stristr(pszTags, "skin"))
 		return CF_WORKSHOP_TYPE_WEAPON_SKIN;
 	if (V_stristr(pszTags, "character") || V_stristr(pszTags, "model"))

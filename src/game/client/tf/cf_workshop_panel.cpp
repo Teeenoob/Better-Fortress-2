@@ -1173,14 +1173,16 @@ CCFWorkshopUploadDialog::CCFWorkshopUploadDialog(Panel* parent, const char* pane
 	, m_nFileID(0)
 	, m_eItemType(CF_WORKSHOP_TYPE_MAP)
 	, m_bIsUpdate(false)
-	, m_bBrowsingContent(false)
+	, m_eBrowsingType(BROWSE_CONTENT)
 	, m_pTitleEntry(NULL)
 	, m_pDescriptionEntry(NULL)
 	, m_pTagsEntry(NULL)
 	, m_pContentPathEntry(NULL)
 	, m_pPreviewImageEntry(NULL)
+	, m_pScreenshotsFolderEntry(NULL)
 	, m_pBrowseContentButton(NULL)
 	, m_pBrowsePreviewButton(NULL)
+	, m_pBrowseScreenshotsButton(NULL)
 	, m_pSubmitButton(NULL)
 	, m_pCancelButton(NULL)
 	, m_pTypeCombo(NULL)
@@ -1240,8 +1242,10 @@ void CCFWorkshopUploadDialog::ApplySchemeSettings(IScheme* pScheme)
 	m_pDescriptionEntry = dynamic_cast<TextEntry*>(FindChildByName("DescriptionEntry"));
 	m_pContentPathEntry = dynamic_cast<TextEntry*>(FindChildByName("ContentPathEntry"));
 	m_pPreviewImageEntry = dynamic_cast<TextEntry*>(FindChildByName("PreviewImageEntry"));
+	m_pScreenshotsFolderEntry = dynamic_cast<TextEntry*>(FindChildByName("ScreenshotsFolderEntry"));
 	m_pBrowseContentButton = dynamic_cast<Button*>(FindChildByName("BrowseContentButton"));
 	m_pBrowsePreviewButton = dynamic_cast<Button*>(FindChildByName("BrowsePreviewButton"));
+	m_pBrowseScreenshotsButton = dynamic_cast<Button*>(FindChildByName("BrowseScreenshotsButton"));
 	m_pSubmitButton = dynamic_cast<Button*>(FindChildByName("UploadButton"));
 	m_pCancelButton = dynamic_cast<Button*>(FindChildByName("CancelButton"));
 	m_pTypeCombo = dynamic_cast<ComboBox*>(FindChildByName("TypeCombo"));
@@ -1414,6 +1418,10 @@ void CCFWorkshopUploadDialog::OnCommand(const char* command)
 	{
 		OpenPreviewFileBrowser();
 	}
+	else if (Q_stricmp(command, "browsescreenshots") == 0)
+	{
+		OpenScreenshotsFolderBrowser();
+	}
 	else
 	{
 		BaseClass::OnCommand(command);
@@ -1441,11 +1449,13 @@ void CCFWorkshopUploadDialog::DoUpload()
 	char szDescription[2048] = {0};
 	char szContentPath[MAX_PATH] = {0};
 	char szPreviewPath[MAX_PATH] = {0};
+	char szScreenshotsPath[MAX_PATH] = {0};
 	
 	if (m_pTitleEntry) m_pTitleEntry->GetText(szTitle, sizeof(szTitle));
 	if (m_pDescriptionEntry) m_pDescriptionEntry->GetText(szDescription, sizeof(szDescription));
 	if (m_pContentPathEntry) m_pContentPathEntry->GetText(szContentPath, sizeof(szContentPath));
 	if (m_pPreviewImageEntry) m_pPreviewImageEntry->GetText(szPreviewPath, sizeof(szPreviewPath));
+	if (m_pScreenshotsFolderEntry) m_pScreenshotsFolderEntry->GetText(szScreenshotsPath, sizeof(szScreenshotsPath));
 	
 	// Validate title
 	if (!szTitle[0])
@@ -1515,7 +1525,8 @@ void CCFWorkshopUploadDialog::DoUpload()
 		type,
 		visibility,
 		m_bIsUpdate ? m_nFileID : 0,
-		szTags[0] ? szTags : NULL
+		szTags[0] ? szTags : NULL,
+		szScreenshotsPath[0] ? szScreenshotsPath : NULL
 	);
 	
 	if (!bSuccess && m_pStatusLabel)
@@ -1631,7 +1642,7 @@ void CCFWorkshopUploadDialog::SetupForUpdate(PublishedFileId_t fileID)
 
 void CCFWorkshopUploadDialog::OpenContentFolderBrowser()
 {
-	m_bBrowsingContent = true;
+	m_eBrowsingType = BROWSE_CONTENT;
 	
 	FileOpenDialog* pDialog = new FileOpenDialog(this, "Select Content Folder", FOD_SELECT_DIRECTORY);
 	pDialog->SetStartDirectory(".");
@@ -1647,12 +1658,28 @@ void CCFWorkshopUploadDialog::OpenContentFolderBrowser()
 
 void CCFWorkshopUploadDialog::OpenPreviewFileBrowser()
 {
-	m_bBrowsingContent = false;
+	m_eBrowsingType = BROWSE_PREVIEW;
 	
 	FileOpenDialog* pDialog = new FileOpenDialog(this, "Select Preview Image", FOD_OPEN);
 	pDialog->SetStartDirectory(".");
 	pDialog->AddFilter("*.jpg;*.jpeg;*.png", "Image Files (*.jpg, *.png)", true);
 	pDialog->AddFilter("*.*", "All Files (*.*)", false);
+	pDialog->AddActionSignalTarget(this);
+	
+	// Make background solid
+	pDialog->SetPaintBackgroundEnabled(true);
+	pDialog->SetPaintBackgroundType(0); // Square background
+	pDialog->SetBgColor(Color(46, 43, 42, 255));
+	
+	pDialog->DoModal();
+}
+
+void CCFWorkshopUploadDialog::OpenScreenshotsFolderBrowser()
+{
+	m_eBrowsingType = BROWSE_SCREENSHOTS;
+	
+	FileOpenDialog* pDialog = new FileOpenDialog(this, "Select Screenshots Folder", FOD_SELECT_DIRECTORY);
+	pDialog->SetStartDirectory(".");
 	pDialog->AddActionSignalTarget(this);
 	
 	// Make background solid
@@ -1669,39 +1696,49 @@ void CCFWorkshopUploadDialog::OnFileSelected(KeyValues* params)
 	
 	if (pszFullPath[0])
 	{
-		if (m_bBrowsingContent)
+		switch (m_eBrowsingType)
 		{
-			// Content folder selected
-			if (m_pContentPathEntry)
-				m_pContentPathEntry->SetText(pszFullPath);
-			if (m_pStatusLabel)
-				m_pStatusLabel->SetText("Content folder selected");
-		}
-		else
-		{
-			// Preview image selected
-			if (m_pPreviewImageEntry)
-				m_pPreviewImageEntry->SetText(pszFullPath);
-			if (m_pStatusLabel)
-				m_pStatusLabel->SetText("Preview image selected");
-			
-			// Load and display the preview image
-			if (m_pPreviewImagePanel && m_pPreviewImage)
-			{
-				if (m_pPreviewImage->SetTextureFromFile(pszFullPath))
+			case BROWSE_CONTENT:
+				// Content folder selected
+				if (m_pContentPathEntry)
+					m_pContentPathEntry->SetText(pszFullPath);
+				if (m_pStatusLabel)
+					m_pStatusLabel->SetText("Content folder selected");
+				break;
+				
+			case BROWSE_PREVIEW:
+				// Preview image selected
+				if (m_pPreviewImageEntry)
+					m_pPreviewImageEntry->SetText(pszFullPath);
+				if (m_pStatusLabel)
+					m_pStatusLabel->SetText("Preview image selected");
+				
+				// Load and display the preview image
+				if (m_pPreviewImagePanel && m_pPreviewImage)
 				{
-					// Size the image to fit the panel
-					int panelWide, panelTall;
-					m_pPreviewImagePanel->GetSize(panelWide, panelTall);
-					m_pPreviewImage->SetSize(panelWide, panelTall);
-					m_pPreviewImagePanel->SetImage(m_pPreviewImage);
+					if (m_pPreviewImage->SetTextureFromFile(pszFullPath))
+					{
+						// Size the image to fit the panel
+						int panelWide, panelTall;
+						m_pPreviewImagePanel->GetSize(panelWide, panelTall);
+						m_pPreviewImage->SetSize(panelWide, panelTall);
+						m_pPreviewImagePanel->SetImage(m_pPreviewImage);
+					}
+					else
+					{
+						if (m_pStatusLabel)
+							m_pStatusLabel->SetText("Failed to load preview image");
+					}
 				}
-				else
-				{
-					if (m_pStatusLabel)
-						m_pStatusLabel->SetText("Failed to load preview image");
-				}
-			}
+				break;
+				
+			case BROWSE_SCREENSHOTS:
+				// Screenshots folder selected
+				if (m_pScreenshotsFolderEntry)
+					m_pScreenshotsFolderEntry->SetText(pszFullPath);
+				if (m_pStatusLabel)
+					m_pStatusLabel->SetText("Screenshots folder selected");
+				break;
 		}
 	}
 }

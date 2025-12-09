@@ -372,7 +372,8 @@ public:
 		CFWorkshopItemType_t type,
 		ERemoteStoragePublishedFileVisibility visibility,
 		PublishedFileId_t existingFileID = 0,  // 0 = create new
-		const char* pszTags = NULL  // Comma-separated tags
+		const char* pszTags = NULL,  // Comma-separated tags
+		const char* pszScreenshotsPath = NULL  // Path to folder containing additional screenshots
 	);
 	
 	// Check upload status
@@ -411,9 +412,29 @@ public:
 	void SetContentReloadPending(bool bPending) { m_bContentReloadPending = bPending; }
 	void SetHUDReloadPending(bool bPending) { m_bHUDReloadPending = bPending; }
 	
+#ifdef CLIENT_DLL
+	// Handle workshop map ID from server
+	void OnWorkshopMapIDReceived(PublishedFileId_t fileID);
+	
+	// Check if we need to download map before connecting (called from server browser)
+	// Returns true if we have the map, false if download is needed
+	bool CheckAndDownloadMapBeforeConnect(const char* pszServerIP, const char* pszMapName, PublishedFileId_t fileID);
+	
+	// Parse Workshop map ID from server rules/info
+	PublishedFileId_t ParseWorkshopMapIDFromServerInfo(const char* pszValue);
+#endif
+	
 	// Server-side hooks
 	void OnMapLoad(const char* pszMapName);
 	void GameServerSteamAPIActivated();
+	
+#ifndef CLIENT_DLL
+	// Broadcast workshop map ID to clients
+	void BroadcastWorkshopMapID(PublishedFileId_t fileID);
+	
+	// Advertise workshop map ID in server info (for server browser)
+	void AdvertiseWorkshopMapID(PublishedFileId_t fileID);
+#endif
 
 private:
 	// Steam callbacks - client
@@ -496,6 +517,7 @@ private:
 	CUtlString m_strPendingDescription;
 	CUtlString m_strPendingContentPath;
 	CUtlString m_strPendingPreviewPath;
+	CUtlString m_strPendingScreenshotsPath;  // Path to folder containing additional screenshots
 	CUtlString m_strPendingTags;  // Comma-separated additional tags
 	CFWorkshopItemType_t m_ePendingType;
 	ERemoteStoragePublishedFileVisibility m_ePendingVisibility;

@@ -214,19 +214,23 @@ private:
 	void BuildTagString(char* pszOut, int maxLen);
 	void OpenContentFolderBrowser();
 	void OpenPreviewFileBrowser();
+	void OpenScreenshotsFolderBrowser();
 
 	PublishedFileId_t m_nFileID;
 	CFWorkshopItemType_t m_eItemType;
 	bool m_bIsUpdate;
-	bool m_bBrowsingContent; // true if browsing for content folder, false if browsing for preview image
+	enum BrowsingType_t { BROWSE_CONTENT, BROWSE_PREVIEW, BROWSE_SCREENSHOTS };
+	BrowsingType_t m_eBrowsingType;
 
 	TextEntry* m_pTitleEntry;
 	TextEntry* m_pDescriptionEntry;
 	TextEntry* m_pTagsEntry;
 	TextEntry* m_pContentPathEntry;
 	TextEntry* m_pPreviewImageEntry;
+	TextEntry* m_pScreenshotsFolderEntry;
 	Button* m_pBrowseContentButton;
 	Button* m_pBrowsePreviewButton;
+	Button* m_pBrowseScreenshotsButton;
 	Button* m_pSubmitButton;
 	Button* m_pCancelButton;
 	ComboBox* m_pTypeCombo;

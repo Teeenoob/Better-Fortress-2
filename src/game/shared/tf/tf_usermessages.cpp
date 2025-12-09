@@ -12,6 +12,25 @@
 // NVNT include to register in haptic user messages
 #include "haptics/haptic_msgs.h"
 
+#ifdef CLIENT_DLL
+#include "tf/cf_workshop_manager.h"
+
+// Client-side handler for WorkshopMapID message
+void MsgFunc_WorkshopMapID( bf_read &msg )
+{
+	// Read the 64-bit file ID (sent as two 32-bit values)
+	uint32 lowBits = msg.ReadLong();
+	uint32 highBits = msg.ReadLong();
+	PublishedFileId_t fileID = ((uint64)highBits << 32) | lowBits;
+	
+	// Pass to workshop manager
+	if (CFWorkshop())
+	{
+		CFWorkshop()->OnWorkshopMapIDReceived(fileID);
+	}
+}
+#endif
+
 void RegisterUserMessages()
 {
 	usermessages->Register( "Geiger", 1 );		// geiger info data
@@ -75,9 +94,15 @@ void RegisterUserMessages()
 // CUSTOM FORTRESS MESSAGES
 //=============================================================================
 	usermessages->Register( "VS_SendNotification", -1 );	// Displays a notification
+	usermessages->Register( "WorkshopMapID", 8 );	// Workshop map file ID (64-bit)
 //=============================================================================
 // HPE_END
 //=============================================================================
+
+#ifdef CLIENT_DLL
+	// Hook the WorkshopMapID message on client
+	usermessages->HookMessage( "WorkshopMapID", MsgFunc_WorkshopMapID );
+#endif
 
 	usermessages->Register( "DamageDodged", -1 );
 
