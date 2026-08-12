@@ -310,8 +310,8 @@ void cf_disable_weapon_skins_changed( IConVar *var, const char *pOldValue, float
 					if ( pItem && pItem->IsValid() )
 					{
 						// Clear the cached weapon skin textures and compositors
+						pItem->CancelWeaponSkinComposite();
 						pItem->SetWeaponSkinBase( NULL );
-						pItem->SetWeaponSkinBaseCompositor( NULL );
 					}
 				}
 			}
